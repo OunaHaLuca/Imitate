@@ -1,0 +1,84 @@
+name: Deploy CaveGame to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  GODOT_VERSION: "4.7.2"
+  SLUG: "play-4f7c12aa5d257dea"
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download game source (release asset)
+        run: |
+          curl -sSL -o cavegame-src.zip "https://github.com/OunaHaLuca/Imitate/releases/download/src-v1/cavegame-src.zip"
+          mkdir -p game
+          unzip -q cavegame-src.zip -d game
+          ls game
+
+      - name: Download Godot
+        run: |
+          curl -sSL -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip
+          sudo mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+          godot --version
+
+      - name: Install web export templates
+        run: |
+          curl -sSL -o templates.tpz "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          mkdir -p ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          unzip -o -q templates.tpz 'templates/web_*.zip' 'templates/version.txt' -d /tmp/tpz
+          cp /tmp/tpz/templates/web_*.zip /tmp/tpz/templates/version.txt ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable/
+
+      - name: Import project
+        working-directory: game
+        run: godot --headless --import
+
+      - name: Export web build
+        working-directory: game
+        run: |
+          mkdir -p "${GITHUB_WORKSPACE}/build/${SLUG}"
+          godot --headless --export-release "Web" "${GITHUB_WORKSPACE}/build/${SLUG}/index.html"
+          ls -lh "${GITHUB_WORKSPACE}/build/${SLUG}"
+
+      - name: Add plain root page (no link to the game)
+        run: |
+          cat > build/index.html <<'HTML'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head><meta charset="utf-8"><title>Imitate</title></head>
+          <body></body>
+          </html>
+          HTML
+          touch build/.nojekyll
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
